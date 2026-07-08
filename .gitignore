@@ -1,0 +1,18 @@
+# Rust build artifacts
+desktop/target/
+
+# Backup files from rustfmt
+desktop/**/*.rs.bk
+
+# Windows debugging symbols (MSVC)
+desktop/**/*.pdb
+
+# ICE dump files
+desktop/**/rustc-ice-*.txt
+
+# Cargo mutants
+desktop/**/mutants.out*/
+
+# Environment files
+.env
+.env.local
