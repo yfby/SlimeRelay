@@ -6,13 +6,26 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 use crate::audio::{build_output_stream, bytes_to_f32, stream_config};
 use crate::net;
-use crate::{new_sample_buffer, CHUNK_SAMPLES, SERVER_ADDR};
+use crate::virtual_microphone;
+use crate::{CHUNK_SAMPLES, SERVER_ADDR, new_sample_buffer};
+
+// slime_sink
 
 pub fn client() -> io::Result<()> {
+    virtual_microphone::setup_virtual_microphone();
     let host = cpal::default_host();
+
+    let devices = host.output_devices().expect("Failed to get output devices");
+
+    for device in devices {
+        println!("Device Name: {}", device.description().unwrap().name());
+    }
+
     let device = host
-        .default_output_device()
-        .expect("No output device available");
+        .output_devices()
+        .expect("Failed to enumerate output devices")
+        .find(|d| d.description().unwrap().name() == "slime_sink")
+        .expect("slime_sink output device not found");
     println!("Output device: {}", device);
 
     let supported_config = device
@@ -40,9 +53,7 @@ pub fn client() -> io::Result<()> {
         sample_format,
         move |len: usize| {
             let mut buf = output_buffer.lock().unwrap();
-            (0..len)
-                .map(|_| buf.pop_front().unwrap_or(0.0))
-                .collect()
+            (0..len).map(|_| buf.pop_front().unwrap_or(0.0)).collect()
         },
         on_error,
     );

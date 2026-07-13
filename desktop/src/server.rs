@@ -7,7 +7,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 use crate::audio::{build_input_stream, f32_to_bytes, stream_config};
 use crate::net;
-use crate::{new_sample_buffer, CHUNK_SAMPLES, SERVER_ADDR};
+use crate::{CHUNK_SAMPLES, SERVER_ADDR, new_sample_buffer};
 
 pub fn server() -> io::Result<()> {
     let host = cpal::default_host();

@@ -17,3 +17,4 @@ pub mod client;
 pub mod net;
 pub mod server;
 pub mod ui;
+pub mod virtual_microphone;
