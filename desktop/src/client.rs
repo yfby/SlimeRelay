@@ -5,22 +5,14 @@ use std::time::Duration;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 use crate::audio::{build_output_stream, bytes_to_f32, stream_config};
+use crate::microphone::setup_virtual_microphone;
 use crate::net;
-use crate::virtual_microphone;
-use crate::{CHUNK_SAMPLES, SERVER_ADDR, new_sample_buffer};
+use crate::{CHUNK_SAMPLES, new_sample_buffer};
 
-// slime_sink
-
-pub fn client() -> io::Result<()> {
-    virtual_microphone::setup_virtual_microphone();
+pub fn client(server_ip: &str) -> io::Result<()> {
+    // Set up the virtual microphone
+    setup_virtual_microphone();
     let host = cpal::default_host();
-
-    let devices = host.output_devices().expect("Failed to get output devices");
-
-    for device in devices {
-        println!("Device Name: {}", device.description().unwrap().name());
-    }
-
     let device = host
         .output_devices()
         .expect("Failed to enumerate output devices")
@@ -37,8 +29,8 @@ pub fn client() -> io::Result<()> {
     let config = stream_config();
 
     let socket = UdpSocket::bind("127.0.0.1:0")?;
-    net::send_hello(&socket, SERVER_ADDR)?;
-    println!("Sent handshake to {}", SERVER_ADDR);
+    net::send_hello(&socket, server_ip)?;
+    println!("Sent handshake to {}", server_ip);
 
     net::wait_for_ready(&socket)?;
     println!("Connected! Receiving audio...");

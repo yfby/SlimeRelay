@@ -13,7 +13,7 @@ pub fn setup_virtual_microphone() {
                 "load-module",
                 "module-null-sink",
                 "sink_name=slime_sink",
-                "sink_properties=device.description=Slime_Sink",
+                "sink_properties=device.description=slime_sink",
             ])
             .output()
             .expect("Failed to load null sink module");
@@ -24,7 +24,7 @@ pub fn setup_virtual_microphone() {
                 "module-remap-source",
                 "master=slime_sink.monitor",
                 "source_name=slime_source",
-                "source_properties=device.description=Slime_Microphone",
+                "source_properties=device.description=SlimeMicrophone",
             ])
             .output()
             .expect("Failed to load remap source module");

@@ -14,7 +14,7 @@ pub fn new_sample_buffer() -> SampleBuffer {
 
 pub mod audio;
 pub mod client;
+pub mod microphone;
 pub mod net;
 pub mod server;
 pub mod ui;
-pub mod virtual_microphone;
