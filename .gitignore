@@ -16,3 +16,4 @@ desktop/**/mutants.out*/
 # Environment files
 .env
 .env.local
+
