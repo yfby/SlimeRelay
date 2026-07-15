@@ -14,7 +14,6 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -27,7 +26,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -39,8 +37,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
@@ -51,8 +47,8 @@ import com.github.yfby.slimerelay.ui.theme.SlimeRelayTheme
 
 class MainActivity : ComponentActivity() {
 
-    private var relayService by mutableStateOf<RelayService?>(null)
-    private var bound by mutableStateOf(false)
+    private var relayService: RelayService? = null
+    private var bound = false
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, service: IBinder) {
@@ -86,30 +82,23 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             SlimeRelayTheme {
-                val service = relayService
-                if (service != null && bound) {
-                    val state by service.uiState.collectAsState()
+                val state by (relayService?.uiState?.collectAsState() ?: throw IllegalStateException("Service not bound"))
 
-                    Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                        RelayScreen(
-                            state = state,
-                            onModeChange = { service.updateMode(it) },
-                            onServerIpChange = { service.updateServerIp(it) },
-                            onServerPortChange = { service.updateServerPort(it) },
-                            onConnectToggle = {
-                                if (state.state == ConnectionState.CONNECTED) {
-                                    service.disconnect()
-                                } else {
-                                    checkAndConnect()
-                                }
-                            },
-                            modifier = Modifier.padding(innerPadding)
-                        )
-                    }
-                } else {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
-                    }
+                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+                    RelayScreen(
+                        state = state,
+                        onModeChange = { relayService?.updateMode(it) },
+                        onServerIpChange = { relayService?.updateServerIp(it) },
+                        onServerPortChange = { relayService?.updateServerPort(it) },
+                        onConnectToggle = {
+                            if (state.state == ConnectionState.CONNECTED) {
+                                relayService?.disconnect()
+                            } else {
+                                checkAndConnect()
+                            }
+                        },
+                        modifier = Modifier.padding(innerPadding)
+                    )
                 }
             }
         }

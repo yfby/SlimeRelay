@@ -6,15 +6,15 @@ plugins {
 android {
     namespace = "com.github.yfby.slimerelay"
     compileSdk {
-        version = release(37) {
+        version = release(36) {
             minorApiLevel = 1
         }
     }
 
     defaultConfig {
         applicationId = "com.github.yfby.slimerelay"
-        minSdk = 26
-        targetSdk = 37
+        minSdk = 24
+        targetSdk = 36
         versionCode = 1
         versionName = "1.0"
 

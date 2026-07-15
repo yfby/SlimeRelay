@@ -28,7 +28,7 @@ pub fn client(server_ip: &str) -> io::Result<()> {
 
     let config = stream_config();
 
-    let socket = UdpSocket::bind("127.0.0.1:0")?;
+    let socket = UdpSocket::bind("0.0.0.0:0")?;
     net::send_hello(&socket, server_ip)?;
     println!("Sent handshake to {}", server_ip);
 
