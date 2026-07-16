@@ -27,6 +27,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -96,6 +97,8 @@ class MainActivity : ComponentActivity() {
                             onModeChange = { service.updateMode(it) },
                             onServerIpChange = { service.updateServerIp(it) },
                             onServerPortChange = { service.updateServerPort(it) },
+                            onServerNameChange = { service.updateServerName(it) },
+                            onDiscoverModeChange = { service.updateDiscoverMode(it) },
                             onConnectToggle = {
                                 if (state.state == ConnectionState.CONNECTED) {
                                     service.disconnect()
@@ -142,6 +145,8 @@ fun RelayScreen(
     onModeChange: (RelayMode) -> Unit,
     onServerIpChange: (String) -> Unit,
     onServerPortChange: (String) -> Unit,
+    onServerNameChange: (String) -> Unit,
+    onDiscoverModeChange: (Boolean) -> Unit,
     onConnectToggle: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -162,20 +167,20 @@ fun RelayScreen(
 
         SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
             SegmentedButton(
-                selected = state.mode == RelayMode.CLIENT,
-                onClick = { onModeChange(RelayMode.CLIENT) },
-                enabled = !isConnected && !isConnecting,
-                shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
-            ) {
-                Text("Client")
-            }
-            SegmentedButton(
                 selected = state.mode == RelayMode.SERVER,
                 onClick = { onModeChange(RelayMode.SERVER) },
                 enabled = !isConnected && !isConnecting,
-                shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
+                shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
             ) {
                 Text("Server")
+            }
+            SegmentedButton(
+                selected = state.mode == RelayMode.CLIENT,
+                onClick = { onModeChange(RelayMode.CLIENT) },
+                enabled = !isConnected && !isConnecting,
+                shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
+            ) {
+                Text("Client")
             }
         }
 
@@ -190,23 +195,39 @@ fun RelayScreen(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    OutlinedTextField(
-                        value = state.serverIp,
-                        onValueChange = onServerIpChange,
-                        label = { Text("Server IP") },
-                        singleLine = true,
-                        enabled = !isConnected && !isConnecting,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    OutlinedTextField(
-                        value = state.serverPort,
-                        onValueChange = onServerPortChange,
-                        label = { Text("Port") },
-                        singleLine = true,
-                        enabled = !isConnected && !isConnecting,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = state.discoverMode,
+                            onCheckedChange = onDiscoverModeChange,
+                            enabled = !isConnected && !isConnecting
+                        )
+                        Text(
+                            text = "Auto-discover server",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+
+                    if (!state.discoverMode) {
+                        OutlinedTextField(
+                            value = state.serverIp,
+                            onValueChange = onServerIpChange,
+                            label = { Text("Server IP") },
+                            singleLine = true,
+                            enabled = !isConnected && !isConnecting,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = state.serverPort,
+                            onValueChange = onServerPortChange,
+                            label = { Text("Port") },
+                            singleLine = true,
+                            enabled = !isConnected && !isConnecting,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                 }
             }
         } else {
@@ -220,6 +241,14 @@ fun RelayScreen(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    OutlinedTextField(
+                        value = state.serverName,
+                        onValueChange = onServerNameChange,
+                        label = { Text("Server Name (for discovery)") },
+                        singleLine = true,
+                        enabled = !isConnected && !isConnecting,
+                        modifier = Modifier.fillMaxWidth()
+                    )
                     OutlinedTextField(
                         value = state.serverPort,
                         onValueChange = onServerPortChange,
@@ -290,15 +319,18 @@ fun RelayScreenPreview() {
     SlimeRelayTheme {
         RelayScreen(
             state = RelayUiState(
-                mode = RelayMode.CLIENT,
+                mode = RelayMode.SERVER,
                 state = ConnectionState.DISCONNECTED,
                 serverIp = "192.168.1.100",
                 audioLevel = 0.3f,
-                statusMessage = "Connected! Receiving audio..."
+                statusMessage = "Connected! Receiving audio...",
+                serverName = "MyPC"
             ),
             onModeChange = {},
             onServerIpChange = {},
             onServerPortChange = {},
+            onServerNameChange = {},
+            onDiscoverModeChange = {},
             onConnectToggle = {}
         )
     }

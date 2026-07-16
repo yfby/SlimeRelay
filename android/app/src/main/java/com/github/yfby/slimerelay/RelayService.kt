@@ -22,6 +22,7 @@ import kotlinx.coroutines.launch
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetSocketAddress
+import java.util.UUID
 
 class RelayService : Service() {
 
@@ -33,6 +34,7 @@ class RelayService : Service() {
 
     private var socket: DatagramSocket? = null
     private var recvJob: kotlinx.coroutines.Job? = null
+    private var discoveryJob: kotlinx.coroutines.Job? = null
 
     inner class LocalBinder : Binder() {
         fun getService(): RelayService = this@RelayService
@@ -67,6 +69,14 @@ class RelayService : Service() {
         _uiState.value = _uiState.value.copy(serverPort = port)
     }
 
+    fun updateServerName(name: String) {
+        _uiState.value = _uiState.value.copy(serverName = name)
+    }
+
+    fun updateDiscoverMode(discover: Boolean) {
+        _uiState.value = _uiState.value.copy(discoverMode = discover)
+    }
+
     fun connect() {
         val state = _uiState.value
         if (state.state == ConnectionState.CONNECTED || state.state == ConnectionState.CONNECTING) return
@@ -81,14 +91,16 @@ class RelayService : Service() {
         }
 
         when (state.mode) {
-            RelayMode.CLIENT -> startClient(state.serverIp, state.serverPort.toIntOrNull() ?: SlimeRelayConstants.SERVER_PORT)
-            RelayMode.SERVER -> startServer(state.serverPort.toIntOrNull() ?: SlimeRelayConstants.SERVER_PORT)
+            RelayMode.CLIENT -> startClient(state)
+            RelayMode.SERVER -> startServer(state)
         }
     }
 
     fun disconnect() {
         recvJob?.cancel()
         recvJob = null
+        discoveryJob?.cancel()
+        discoveryJob = null
         socket?.close()
         socket = null
         _uiState.value = _uiState.value.copy(
@@ -100,18 +112,46 @@ class RelayService : Service() {
         stopSelf()
     }
 
-    private fun startClient(ip: String, port: Int) {
+    private fun startClient(state: RelayUiState) {
+        if (state.discoverMode) {
+            discoveryJob = scope.launch {
+                try {
+                    updateStatus("Searching for server...")
+                    val discoverySocket = DatagramSocket(SlimeRelayConstants.DISCOVERY_PORT)
+                    discoverySocket.soTimeout = 30000
+
+                    val (serverName, serverAddr) = UdpProtocol.waitForDiscovery(discoverySocket)
+                    discoverySocket.close()
+
+                    updateStatus("Discovered server '$serverName' at $serverAddr")
+                    connectToServer(serverAddr)
+                } catch (e: Exception) {
+                    if (recvJob?.isCancelled != true && discoveryJob?.isCancelled != true) {
+                        updateStatus("Discovery failed: ${e.message}")
+                        _uiState.value = _uiState.value.copy(state = ConnectionState.DISCONNECTED)
+                    }
+                }
+            }
+        } else {
+            val serverAddr = InetSocketAddress(
+                state.serverIp,
+                state.serverPort.toIntOrNull() ?: SlimeRelayConstants.SERVER_PORT
+            )
+            connectToServer(serverAddr)
+        }
+    }
+
+    private fun connectToServer(serverAddr: InetSocketAddress) {
         recvJob = scope.launch {
             try {
                 val sock = DatagramSocket()
                 socket = sock
 
-                val serverAddr = InetSocketAddress(ip, port)
                 UdpProtocol.sendHello(sock, serverAddr)
                 updateStatus("Sent HELLO, waiting for READY...")
 
                 sock.soTimeout = 5000
-                UdpProtocol.waitForReady(sock)
+                val sessionId = UdpProtocol.waitForReady(sock)
                 sock.soTimeout = 100
 
                 updateStatus("Connected! Receiving audio...")
@@ -120,15 +160,29 @@ class RelayService : Service() {
                 val player = SpeakerPlayer { e -> updateStatus("Audio error: $e") }
                 player.start()
 
-                val recvBuf = ByteArray(SlimeRelayConstants.CHUNK_SAMPLES * 4)
+                val recvBuf = ByteArray(SlimeRelayConstants.CHUNK_SAMPLES * 4 + SlimeRelayConstants.RTP_HEADER_SIZE)
+                var lastRtpReceived = System.currentTimeMillis()
+
                 try {
                     while (true) {
+                        if (System.currentTimeMillis() - lastRtpReceived > SlimeRelayConstants.KEEPALIVE_TIMEOUT_MS) {
+                            updateStatus("Connection lost: no packets received")
+                            break
+                        }
+
                         try {
                             val packet = DatagramPacket(recvBuf, recvBuf.size)
                             sock.receive(packet)
-                            val samples = UdpProtocol.bytesToF32(recvBuf.copyOf(packet.length))
-                            player.writeSamples(samples)
-                            _uiState.value = _uiState.value.copy(audioLevel = player.computeLevel(samples))
+                            val msg = UdpProtocol.parseMessage(recvBuf.copyOf(packet.length))
+                            if (msg is Message.Rtp) {
+                                lastRtpReceived = System.currentTimeMillis()
+                                val samples = UdpProtocol.bytesToF32(msg.payload)
+                                player.writeSamples(samples)
+                                _uiState.value = _uiState.value.copy(audioLevel = player.computeLevel(samples))
+                            } else if (msg is Message.Bye) {
+                                updateStatus("Server sent BYE: ${msg.reason}")
+                                break
+                            }
                         } catch (e: java.net.SocketTimeoutException) {
                             continue
                         }
@@ -145,25 +199,57 @@ class RelayService : Service() {
         }
     }
 
-    private fun startServer(port: Int) {
+    private fun startServer(state: RelayUiState) {
         recvJob = scope.launch {
             try {
-                val sock = DatagramSocket(port)
+                val sock = DatagramSocket(SlimeRelayConstants.SERVER_PORT)
                 socket = sock
-                updateStatus("Listening on port $port, waiting for client...")
+
+                discoveryJob = scope.launch {
+                    try {
+                        val discoverySocket = DatagramSocket()
+                        discoverySocket.broadcast = true
+                        val serverName = state.serverName.ifBlank { android.os.Build.MODEL }
+                        val discoveryPacket = UdpProtocol.buildDiscovery(serverName, SlimeRelayConstants.SERVER_PORT)
+                        val broadcastAddr = InetSocketAddress("255.255.255.255", SlimeRelayConstants.DISCOVERY_PORT)
+
+                        while (true) {
+                            try {
+                                val packet = DatagramPacket(discoveryPacket, discoveryPacket.size, broadcastAddr)
+                                discoverySocket.send(packet)
+                            } catch (e: Exception) {
+                                Log.w("RelayService", "Discovery broadcast error: ${e.message}")
+                            }
+                            kotlinx.coroutines.delay(SlimeRelayConstants.KEEPALIVE_INTERVAL_MS)
+                        }
+                    } catch (e: Exception) {
+                        Log.e("RelayService", "Discovery broadcast failed: ${e.message}")
+                    }
+                }
+
+                updateStatus("Listening on port ${SlimeRelayConstants.SERVER_PORT}, waiting for client...")
 
                 val clientAddr = UdpProtocol.waitForHello(sock)
-                UdpProtocol.sendReady(sock, clientAddr)
+
+                val sessionId = UUID.randomUUID().toString().replace("-", "").toByteArray().copyOf(16)
+                UdpProtocol.sendReady(sock, clientAddr, sessionId)
 
                 updateStatus("Client connected! Streaming audio...")
                 _uiState.value = _uiState.value.copy(state = ConnectionState.CONNECTED)
+
+                val ssrc = (Math.random() * 0xFFFFFFFFL).toLong() and 0xFFFFFFFFL
+                var sequence = 0
+                var timestamp = 0L
 
                 val recorder = MicRecorder(
                     onSamples = { samples ->
                         try {
                             val bytes = UdpProtocol.f32ToBytes(samples)
-                            val packet = DatagramPacket(bytes, bytes.size, clientAddr)
+                            val rtpPacket = UdpProtocol.buildRtpPacket(sequence, timestamp, ssrc, bytes)
+                            val packet = DatagramPacket(rtpPacket, rtpPacket.size, clientAddr)
                             sock.send(packet)
+                            sequence = (sequence + 1) and 0xFFFF
+                            timestamp = (timestamp + SlimeRelayConstants.CHUNK_SAMPLES) and 0xFFFFFFFFL
                             _uiState.value = _uiState.value.copy(audioLevel = MicRecorderHelper.computeLevel(samples))
                         } catch (e: Exception) {
                             if (recvJob?.isCancelled != true) {

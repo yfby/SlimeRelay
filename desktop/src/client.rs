@@ -1,16 +1,26 @@
 use std::io;
 use std::net::UdpSocket;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 use crate::audio::{build_output_stream, bytes_to_f32, stream_config};
 use crate::microphone::setup_virtual_microphone;
 use crate::net;
-use crate::{CHUNK_SAMPLES, new_sample_buffer};
+use crate::{CHUNK_SAMPLES, DISCOVERY_PORT, KEEPALIVE_TIMEOUT_MS, new_sample_buffer};
 
-pub fn client(server_ip: &str) -> io::Result<()> {
-    // Set up the virtual microphone
+pub fn client(server_ip: &str, discover: bool) -> io::Result<()> {
+    let server_addr = if discover {
+        println!("Searching for server...");
+        let discovery_socket = UdpSocket::bind(format!("0.0.0.0:{}", DISCOVERY_PORT))?;
+        discovery_socket.set_read_timeout(Some(Duration::from_secs(30)))?;
+        let (name, addr) = net::wait_for_discovery(&discovery_socket)?;
+        println!("Discovered server '{}' at {}", name, addr);
+        addr.to_string()
+    } else {
+        server_ip.to_string()
+    };
+
     setup_virtual_microphone();
     let host = cpal::default_host();
     let device = host
@@ -29,10 +39,10 @@ pub fn client(server_ip: &str) -> io::Result<()> {
     let config = stream_config();
 
     let socket = UdpSocket::bind("0.0.0.0:0")?;
-    net::send_hello(&socket, server_ip)?;
-    println!("Sent handshake to {}", server_ip);
+    net::send_hello(&socket, &server_addr)?;
+    println!("Sent handshake to {}", server_addr);
 
-    net::wait_for_ready(&socket)?;
+    let _session_id = net::wait_for_ready(&socket)?;
     println!("Connected! Receiving audio...");
 
     let buffer = new_sample_buffer();
@@ -52,14 +62,33 @@ pub fn client(server_ip: &str) -> io::Result<()> {
 
     stream.play().expect("Failed to start output stream");
 
-    socket.set_read_timeout(Some(Duration::from_secs(1)))?;
-    let mut recv_buf = vec![0u8; CHUNK_SAMPLES * 4];
+    socket.set_read_timeout(Some(Duration::from_millis(100)))?;
+    let mut recv_buf = vec![0u8; CHUNK_SAMPLES * 4 + 12];
+    let mut last_rtp_received = Instant::now();
 
     loop {
+        if last_rtp_received.elapsed() > Duration::from_millis(KEEPALIVE_TIMEOUT_MS) {
+            eprintln!("Connection lost: no packets received for {}s", KEEPALIVE_TIMEOUT_MS / 1000);
+            break;
+        }
+
         match socket.recv_from(&mut recv_buf) {
             Ok((amt, _)) => {
-                let samples = bytes_to_f32(&recv_buf[..amt]);
-                buffer.lock().unwrap().extend(samples.iter());
+                match net::parse_message(&recv_buf[..amt]) {
+                    Ok(net::Message::Rtp { payload, .. }) => {
+                        last_rtp_received = Instant::now();
+                        let samples = bytes_to_f32(&payload);
+                        buffer.lock().unwrap().extend(samples.iter());
+                    }
+                    Ok(net::Message::Bye { reason }) => {
+                        println!("Server sent BYE: {}", reason);
+                        break;
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        eprintln!("Invalid packet: {}", e);
+                    }
+                }
             }
             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => continue,
             Err(ref e) if e.kind() == io::ErrorKind::TimedOut => continue,
