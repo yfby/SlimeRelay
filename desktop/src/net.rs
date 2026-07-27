@@ -2,8 +2,8 @@ use std::io;
 use std::net::{SocketAddr, UdpSocket};
 
 use crate::{
-    DISCOVERY_PORT, MSG_BYE, MSG_DISCOVERY, MSG_HELLO, MSG_READY, MSG_RTP,
-    PROTOCOL_VERSION, RTP_HEADER_SIZE, RTP_PT_PCM, SERVER_NAME_SIZE, SESSION_ID_SIZE,
+    DISCOVERY_PORT, MSG_BYE, MSG_DISCOVERY, MSG_HELLO, MSG_READY, MSG_RTP, PROTOCOL_VERSION,
+    RTP_HEADER_SIZE, RTP_PT_PCM, SERVER_NAME_SIZE, SESSION_ID_SIZE,
 };
 
 #[derive(Debug, Clone)]
@@ -79,6 +79,73 @@ pub fn build_bye(reason: &str) -> Vec<u8> {
     reason_padded[..copy_len].copy_from_slice(&reason_bytes[..copy_len]);
     buf.extend_from_slice(&reason_padded);
     buf
+}
+
+pub fn wait_for_discovery(socket: &UdpSocket) -> io::Result<(String, SocketAddr)> {
+    let mut buf = [0u8; 128];
+    loop {
+        let (_, src_addr) = socket.recv_from(&mut buf)?;
+        match parse_message(&buf[..]) {
+            Ok(Message::Discovery { server_name, port }) => {
+                let server_addr = SocketAddr::new(src_addr.ip(), port);
+                return Ok((server_name, server_addr));
+            }
+            Ok(_) => continue,
+            Err(_) => continue,
+        }
+    }
+}
+
+pub fn send_discovery_broadcast(
+    socket: &UdpSocket,
+    server_name: &str,
+    port: u16,
+) -> io::Result<()> {
+    let msg = build_discovery(server_name, port);
+    let broadcast_addr = format!("255.255.255.255:{}", DISCOVERY_PORT);
+    socket.send_to(&msg, broadcast_addr)?;
+    Ok(())
+}
+
+pub fn wait_for_hello(socket: &UdpSocket) -> io::Result<SocketAddr> {
+    let mut buf = [0u8; 128];
+    loop {
+        let (amt, client_addr) = socket.recv_from(&mut buf)?;
+        match parse_message(&buf[..amt]) {
+            Ok(Message::Hello) => return Ok(client_addr),
+            Ok(_) => continue,
+            Err(_) => continue,
+        }
+    }
+}
+
+pub fn send_hello(socket: &UdpSocket, server_addr: &str) -> io::Result<()> {
+    let msg = build_hello();
+    socket.send_to(&msg, server_addr)?;
+    Ok(())
+}
+
+pub fn wait_for_ready(socket: &UdpSocket) -> io::Result<[u8; SESSION_ID_SIZE]> {
+    let mut buf = [0u8; 128];
+    let (amt, _) = socket.recv_from(&mut buf)?;
+    match parse_message(&buf[..amt]) {
+        Ok(Message::Ready { session_id }) => Ok(session_id),
+        Ok(_) => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Server did not respond with READY",
+        )),
+        Err(e) => Err(e),
+    }
+}
+
+pub fn send_ready(
+    socket: &UdpSocket,
+    addr: SocketAddr,
+    session_id: &[u8; SESSION_ID_SIZE],
+) -> io::Result<()> {
+    let msg = build_ready(session_id);
+    socket.send_to(&msg, addr)?;
+    Ok(())
 }
 
 pub fn parse_message(data: &[u8]) -> io::Result<Message> {
@@ -163,70 +230,4 @@ pub fn parse_message(data: &[u8]) -> io::Result<Message> {
             format!("Unknown message type: 0x{:02X}", msg_type),
         )),
     }
-}
-
-pub fn wait_for_hello(socket: &UdpSocket) -> io::Result<SocketAddr> {
-    let mut buf = [0u8; 128];
-    loop {
-        let (amt, client_addr) = socket.recv_from(&mut buf)?;
-        match parse_message(&buf[..amt]) {
-            Ok(Message::Hello) => return Ok(client_addr),
-            Ok(_) => continue,
-            Err(_) => continue,
-        }
-    }
-}
-
-pub fn send_ready(socket: &UdpSocket, addr: SocketAddr, session_id: &[u8; SESSION_ID_SIZE]) -> io::Result<()> {
-    let msg = build_ready(session_id);
-    socket.send_to(&msg, addr)?;
-    Ok(())
-}
-
-pub fn send_hello(socket: &UdpSocket, server_addr: &str) -> io::Result<()> {
-    let msg = build_hello();
-    socket.send_to(&msg, server_addr)?;
-    Ok(())
-}
-
-pub fn wait_for_ready(socket: &UdpSocket) -> io::Result<[u8; SESSION_ID_SIZE]> {
-    let mut buf = [0u8; 128];
-    let (amt, _) = socket.recv_from(&mut buf)?;
-    match parse_message(&buf[..amt]) {
-        Ok(Message::Ready { session_id }) => Ok(session_id),
-        Ok(_) => Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "Server did not respond with READY",
-        )),
-        Err(e) => Err(e),
-    }
-}
-
-pub fn wait_for_discovery(socket: &UdpSocket) -> io::Result<(String, SocketAddr)> {
-    let mut buf = [0u8; 128];
-    loop {
-        let (_, src_addr) = socket.recv_from(&mut buf)?;
-        match parse_message(&buf[..]) {
-            Ok(Message::Discovery {
-                server_name,
-                port,
-            }) => {
-                let server_addr = SocketAddr::new(src_addr.ip(), port);
-                return Ok((server_name, server_addr));
-            }
-            Ok(_) => continue,
-            Err(_) => continue,
-        }
-    }
-}
-
-pub fn send_discovery_broadcast(
-    socket: &UdpSocket,
-    server_name: &str,
-    port: u16,
-) -> io::Result<()> {
-    let msg = build_discovery(server_name, port);
-    let broadcast_addr = format!("255.255.255.255:{}", DISCOVERY_PORT);
-    socket.send_to(&msg, broadcast_addr)?;
-    Ok(())
 }
