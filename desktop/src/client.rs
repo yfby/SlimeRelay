@@ -21,7 +21,10 @@ pub fn client(server_ip: &str, discover: bool) -> io::Result<()> {
         server_ip.to_string()
     };
 
+    // virtual microphone sink
     setup_virtual_microphone();
+
+    // microhpone device set up
     let host = cpal::default_host();
     let device = host
         .output_devices()
@@ -45,10 +48,12 @@ pub fn client(server_ip: &str, discover: bool) -> io::Result<()> {
     let _session_id = net::wait_for_ready(&socket)?;
     println!("Connected! Receiving audio...");
 
+    // audio buffer
     let buffer = new_sample_buffer();
+    let output_buffer = buffer.clone();
+
     let on_error = |err: cpal::Error| eprintln!("Output stream error: {}", err);
 
-    let output_buffer = buffer.clone();
     let stream = build_output_stream(
         &device,
         &config,
@@ -68,28 +73,29 @@ pub fn client(server_ip: &str, discover: bool) -> io::Result<()> {
 
     loop {
         if last_rtp_received.elapsed() > Duration::from_millis(KEEPALIVE_TIMEOUT_MS) {
-            eprintln!("Connection lost: no packets received for {}s", KEEPALIVE_TIMEOUT_MS / 1000);
+            eprintln!(
+                "Connection lost: no packets received for {}s",
+                KEEPALIVE_TIMEOUT_MS / 1000
+            );
             break;
         }
 
         match socket.recv_from(&mut recv_buf) {
-            Ok((amt, _)) => {
-                match net::parse_message(&recv_buf[..amt]) {
-                    Ok(net::Message::Rtp { payload, .. }) => {
-                        last_rtp_received = Instant::now();
-                        let samples = bytes_to_f32(&payload);
-                        buffer.lock().unwrap().extend(samples.iter());
-                    }
-                    Ok(net::Message::Bye { reason }) => {
-                        println!("Server sent BYE: {}", reason);
-                        break;
-                    }
-                    Ok(_) => {}
-                    Err(e) => {
-                        eprintln!("Invalid packet: {}", e);
-                    }
+            Ok((amt, _)) => match net::parse_message(&recv_buf[..amt]) {
+                Ok(net::Message::Rtp { payload, .. }) => {
+                    last_rtp_received = Instant::now();
+                    let samples = bytes_to_f32(&payload);
+                    buffer.lock().unwrap().extend(samples.iter());
                 }
-            }
+                Ok(net::Message::Bye { reason }) => {
+                    println!("Server sent BYE: {}", reason);
+                    break;
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    eprintln!("Invalid packet: {}", e);
+                }
+            },
             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => continue,
             Err(ref e) if e.kind() == io::ErrorKind::TimedOut => continue,
             Err(e) => {

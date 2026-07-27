@@ -25,6 +25,7 @@ pub const KEEPALIVE_TIMEOUT_MS: u64 = 6000;
 
 pub type SampleBuffer = Arc<Mutex<VecDeque<f32>>>;
 
+// audio buffer
 pub fn new_sample_buffer() -> SampleBuffer {
     Arc::new(Mutex::new(VecDeque::new()))
 }

@@ -8,9 +8,7 @@ use rand::Rng;
 
 use crate::audio::{build_input_stream, f32_to_bytes, stream_config};
 use crate::net;
-use crate::{
-    CHUNK_SAMPLES, DISCOVERY_PORT, KEEPALIVE_INTERVAL_MS, SERVER_PORT, new_sample_buffer,
-};
+use crate::{CHUNK_SAMPLES, DISCOVERY_PORT, KEEPALIVE_INTERVAL_MS, SERVER_PORT, new_sample_buffer};
 
 pub fn server(server_name: &str) -> io::Result<()> {
     let host = cpal::default_host();
@@ -36,11 +34,15 @@ pub fn server(server_name: &str) -> io::Result<()> {
     println!("Server listening on {}", server_addr);
 
     let discovery_name = server_name.to_string();
-    thread::spawn(move || loop {
-        if let Err(e) = net::send_discovery_broadcast(&discovery_socket, &discovery_name, SERVER_PORT) {
-            eprintln!("Discovery broadcast error: {}", e);
+    thread::spawn(move || {
+        loop {
+            if let Err(e) =
+                net::send_discovery_broadcast(&discovery_socket, &discovery_name, SERVER_PORT)
+            {
+                eprintln!("Discovery broadcast error: {}", e);
+            }
+            thread::sleep(Duration::from_millis(KEEPALIVE_INTERVAL_MS));
         }
-        thread::sleep(Duration::from_millis(KEEPALIVE_INTERVAL_MS));
     });
 
     println!("Waiting for client...");
@@ -55,10 +57,12 @@ pub fn server(server_name: &str) -> io::Result<()> {
     let ssrc: u32 = rand::thread_rng().r#gen();
     println!("SSRC: 0x{:08X}", ssrc);
 
+    // audio buffer
     let buffer = new_sample_buffer();
+    let input_buffer = buffer.clone();
+
     let on_error = |err: cpal::Error| eprintln!("Input stream error: {}", err);
 
-    let input_buffer = buffer.clone();
     let stream = build_input_stream(
         &device,
         &config,
